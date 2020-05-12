@@ -7,6 +7,7 @@ driver = Chrome(ChromeDriverManager().install())
 driver.maximize_window()
 
 
+# noinspection PyBroadException
 def runner():
     try:
         account_payer = logic.AccountPay(driver)
@@ -21,7 +22,7 @@ def runner():
         log.info('Looped over all the links')
         input('Finished, press enter to quit')
         driver.quit()
-    except Exception as Exc:
+    except:
         logging.exception('Critical Failure')
         input('An error occured press enter to quit the application')
         driver.quit()
@@ -34,4 +35,3 @@ if __name__ == '__main__':
     log = logging.getLogger(__name__)
 
     runner()
-
