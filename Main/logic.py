@@ -28,7 +28,7 @@ class AccountPay:
 
     def log_in(self):
         self.driver.get('https://login.xero.com/')
-        # test_login(self.driver)
+        # log_in(self.driver)
         input("Please press enter once you login")
 
     def org_switch(self):
@@ -120,7 +120,7 @@ class AccountPay:
                 wd_wait(self.driver, 30).until(ec.presence_of_element_located((By.ID, 'frmMain')))
 
         # Get the number of items that need to be paid out
-        total_items = int(self.driver.find_element_by_id('total-paged-items').text)
+        total_items = int(self.driver.find_element_by_id('total-paged-items').text) - 1
 
         if total_items // 200 > 0:
             # calculates the number of pages based on the number of items, taking in consideration that pages will include 200 items
