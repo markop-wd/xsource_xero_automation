@@ -1,7 +1,7 @@
-import logic
-
 from selenium.webdriver import Chrome
 from webdriver_manager.chrome import ChromeDriverManager
+
+import logic
 
 driver = Chrome(ChromeDriverManager().install())
 driver.maximize_window()
