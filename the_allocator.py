@@ -1,4 +1,4 @@
-from Main import logic
+import logic
 
 from selenium.webdriver import Chrome
 from webdriver_manager.chrome import ChromeDriverManager
