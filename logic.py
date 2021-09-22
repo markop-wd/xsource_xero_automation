@@ -1,4 +1,8 @@
+"""
+Main logic of the automation
+"""
 import csv
+import re
 import logging
 from time import sleep
 
@@ -6,292 +10,229 @@ from selenium.common import exceptions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.wait import WebDriverWait as WdWait
+from selenium.webdriver import Chrome
+
+from helper_funcs import element_clicker, element_waiter, login_element_waiter, LoginException, OrgFinderException
+from urls import INVOICE_STATUS, PAGE_SEARCH
 
 logger = logging.getLogger(__name__)
 
-with open('compare_csv.csv', mode='w', newline='') as compare_csv:
-    field_names = ['Link', 'More To Allocate', 'Error']
-    compare_csv = csv.DictWriter(compare_csv, fieldnames=field_names)
 
-    compare_csv.writeheader()
+def log_in(driver: Chrome):
+    """
+    Simple log in function utilizing a helper
+    :param driver:
+    :return:
+    """
+    driver.get('https://login.xero.com/')
+    # TODO - Extract the three WdWaits with try except in a pattern
+    input("Please press enter once you login")
+    try:
+        login_element_waiter(driver)
+    except LoginException:
+        logger.warning('Log in failed multiple times, closing the application')
+        driver.quit()
 
 
-class AccountPay:
-    total_list: list
-
-    def __init__(self, driver):
-        self.clickerino = False
-        self.driver = driver
-        self.organisation_name = ''
-        self.current_org = ''
-        self.total_list = []
-
-    def log_in(self):
-        self.driver.get('https://login.xero.com/')
-        # log_in(self.driver)
-        input("Please press enter once you login")
-
-    def org_switch(self):
+# TODO Refactor and recheck
+def org_switch(driver: Chrome, org_name: str):
+    """
+    Changing organizations within Xero
+    :param driver:
+    :param org_name:
+    :return:
+    """
+    current_org = ''
+    org_button_text = WdWait(driver, 10).until(
+        ec.presence_of_element_located((By.CLASS_NAME, 'xrh-appbutton--text'))).text
+    if org_name.lower() != org_button_text.lower:
+        element_clicker(driver, css_selector='.xrh-button.xrh-appbutton')
+        element_clicker(driver, css_selector='.xrh-button.xrh-verticalmenuitem--body')
         try:
-            WdWait(self.driver, 10).until(ec.presence_of_element_located((By.ID, 'root')))
+            WdWait(driver, 6).until(ec.presence_of_element_located(
+                (By.CLASS_NAME, 'xrh-orgsearch--input'))).send_keys(org_name.lower())
         except exceptions.TimeoutException:
-            self.driver.refresh()
-            if "login.xero.com" in self.driver.current_url:
-                logger.warning("Login failed, please log in again")
-                input("Press enter once finished")
-                try:
-                    WdWait(self.driver, 20).until(ec.presence_of_element_located((By.ID, 'root')))
-                except exceptions.TimeoutException:
-                    self.driver.refresh()
-                    if "login.xero.com" in self.driver.current_url:
-                        logger.warning("Login failed, please log in again")
-                        input("Press enter once finished")
-                    WdWait(self.driver, 20).until(ec.presence_of_element_located((By.ID, 'root')))
-
-        org_button_text = WdWait(self.driver, 10).until(
-            ec.presence_of_element_located((By.CLASS_NAME, 'xrh-appbutton--text'))).text
-        if org_button_text.lower() != self.organisation_name.lower():
-            WdWait(self.driver, 10).until(
-                ec.element_to_be_clickable((By.CLASS_NAME, 'xrh-button.xrh-appbutton'))).click()
-            #           self.driver.find_element_by_class_name('xrh-button.xrh-appbutton').click()
-            WdWait(self.driver, 10).until(
-                ec.element_to_be_clickable((By.CLASS_NAME, 'xrh-button.xrh-verticalmenuitem'
-                                                           '--body'))).click()
+            for link_item in driver.find_elements_by_class_name('xrh-menuitem-orgpractice'):
+                if link_item.text == org_name:
+                    element_clicker(driver, web_element=link_item)
+        else:
             try:
-                WdWait(self.driver, 6).until(ec.presence_of_element_located(
-                    (By.CLASS_NAME, 'xrh-orgsearch--input'))).send_keys(self.organisation_name.lower())
-            except exceptions.TimeoutException:
-                for link_item in self.driver.find_elements_by_class_name('xrh-menuitem-orgpractice'):
-                    if link_item.text == self.organisation_name:
-                        link_item.click()
+                WdWait(driver, 5).until(
+                    ec.presence_of_element_located((By.CLASS_NAME, 'xrh-menuitem-orgpractice')))
+            except exceptions.TimeoutException as exc:
+                raise OrgFinderException(f'Cannot find {org_name}') from exc
             else:
-                try:
-                    WdWait(self.driver, 5).until(
-                        ec.presence_of_element_located((By.CLASS_NAME, 'xrh-menuitem-orgpractice')))
-                except exceptions.TimeoutException:
-                    raise Exception('Cannot find', self.organisation_name)
-                else:
-                    sleep(2)
-                    orgs = self.driver.find_elements_by_class_name('xrh-menuitem-orgpractice')
-                    org_names = [orggg.text for orggg in
-                                 self.driver.find_elements_by_class_name('xrh-menuitem-orgpractice')]
-                for element in orgs:
-                    if element.text.lower() == self.organisation_name.lower():
-                        self.driver.find_element_by_class_name('xrh-menuitem-orgpractice').click()
+                sleep(2)
+                orgs = driver.find_elements_by_class_name('xrh-menuitem-orgpractice')
+                org_names = [orggg.text for orggg in
+                             driver.find_elements_by_class_name('xrh-menuitem-orgpractice')]
+            for element in orgs:
+                if element.text.lower() == org_name.lower():
+                    element_clicker(driver, css_selector='.xrh-menuitem-orgpractice')
+                    sleep(5)
+                    current_org = WdWait(driver, 25).until(ec.presence_of_element_located(
+                        (By.CLASS_NAME, 'xrh-appbutton--text'))).text
+                    if current_org.lower() != org_name.lower():
+                        raise OrgFinderException(f'Cannot find {org_name}')
+                    break
+            else:
+
+                matching_org_names = [_org_name for _org_name in org_names if
+                                      org_name.lower() in _org_name.lower()]
+                if matching_org_names:
+                    print('No exact match with that organisation name - did you mean?')
+                    for org in matching_org_names:
+                        print(f"  {org}")
+
+                org_name = input('Please re-input the exact organisation name: ').lower()
+                for organis in driver.find_elements_by_class_name('xrh-menuitem-orgpractice'):
+                    if org_name.lower() == organis.text.lower():
+                        element_clicker(driver, web_element=organis)
                         sleep(5)
-                        self.current_org = WdWait(self.driver, 25).until(ec.presence_of_element_located(
+                        current_org = WdWait(driver, 25).until(ec.presence_of_element_located(
                             (By.CLASS_NAME, 'xrh-appbutton--text'))).text
-                        if self.current_org.lower() != self.organisation_name.lower():
-                            raise Exception('Couldn\'t log in to', self.organisation_name)
+                        if current_org.lower() != org_name.lower():
+                            raise OrgFinderException(f'Cannot find {org_name}')
                         break
                 else:
-                    print('No exact match with that organisation name - did you mean?')
-                    [print("  " + org_name) for org_name in org_names if
-                     self.organisation_name.lower() in org_name.lower()]
-                    self.organisation_name = input('Please re-input the exact organisation name: ').lower()
-                    for organis in self.driver.find_elements_by_class_name('xrh-menuitem-orgpractice'):
-                        if self.organisation_name.lower() == organis.text.lower():
-                            organis.click()
-                            sleep(5)
-                            self.current_org = WdWait(self.driver, 25).until(ec.presence_of_element_located(
-                                (By.CLASS_NAME, 'xrh-appbutton--text'))).text
-                            if self.current_org.lower() != self.organisation_name.lower():
-                                raise Exception('Couldn\'t log in to', self.organisation_name)
-                            break
-                    else:
-                        self.driver.refresh()
-                        self.org_switch()
-        else:
-            self.current_org = self.organisation_name
+                    raise OrgFinderException(f'Cannot find {org_name}')
 
-    # TODO - Add a name checker
-    def href_extraction(self):
+    else:
+        current_org = org_name
 
-        self.driver.get('https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED')
-        try:
-            WdWait(self.driver, 10).until(ec.presence_of_element_located((By.ID, 'frmMain')))
-        except exceptions.TimeoutException:
-            self.driver.get('https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED')
+    return current_org
+
+
+# TODO - Refactor and recheck
+def invoice_pay(driver: Chrome, total_list: list) -> None:
+    """
+    Takes all the invoice urls and completes the action/calculations needed to pay them
+    :param driver:
+    :param total_list:
+    :return:
+    """
+    for href in total_list:
+        driver.get(href)
+        more_to_allocate = False
+        _load_el = element_waiter(driver, css_selector='.document.invoice', url=href)
+        if not _load_el:
+            logger.error("could not load %s", href)
+            continue
+
+        if 'Credit Note' in str(driver.find_element_by_id('title').text):
             try:
-                WdWait(self.driver, 10).until(ec.presence_of_element_located((By.ID, 'frmMain')))
-            except exceptions.TimeoutException:
-                self.driver.get(
-                    'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED')
-                WdWait(self.driver, 30).until(ec.presence_of_element_located((By.ID, 'frmMain')))
+                allocate_credit_btn = driver.find_element_by_css_selector(
+                    'dd > ul > li > a[href*="/Credits/Allocate"]')
+            except exceptions.NoSuchElementException:
+                continue
+            else:
+                allocate_url = allocate_credit_btn.get_attribute('href')
+                driver.get(allocate_url)
+                _load_el = element_waiter(driver, css_selector='.document.allocate.forms', url=allocate_url)
 
-        # Get the number of items that need to be paid out
-        total_items = int(self.driver.find_element_by_id('total-paged-items').text) - 1
-
-        if total_items // 200 > 0:
-            # calculates the number of pages based on the number of items, taking in consideration that pages will
-            # include 200 items
-            page_count = total_items // 200
-            # create a list of page numbers to pass to the first self.driver.get below
-            page_num = list(range(1, page_count + 2))
-            for pg_num in page_num:
-                current_list = []
-                self.driver.get(
-                    f'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED'
-                    f'&graphSearch=False&dateWithin=any&page={pg_num}&PageSize=200&orderBy=PaidToName&direction=ASC')
-                try:
-                    table = WdWait(self.driver, 10).until(
-                        ec.presence_of_element_located((By.CSS_SELECTOR, 'table > tbody')))
-                except exceptions.TimeoutException:
-                    self.driver.get(
-                        f'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED'
-                        f'&graphSearch=False&dateWithin=any&page='
-                        f'{pg_num}&PageSize=200&orderBy=PaidToName&direction=ASC')
-                    try:
-                        table = WdWait(self.driver, 10).until(
-                            ec.presence_of_element_located((By.CSS_SELECTOR, 'table > tbody')))
-                    except exceptions.TimeoutException:
-                        self.driver.get(
-                            f'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS'
-                            f'%2fAUTHORISED&graphSearch=False&dateWithin=any&page='
-                            f'{pg_num}&PageSize=200&orderBy=PaidToName&direction=ASC')
-                        table = WdWait(self.driver, 10).until(
-                            ec.presence_of_element_located((By.CSS_SELECTOR, 'table > tbody')))
-                try:
-                    for icon in table.find_elements_by_class_name('icons.credit'):
-                        current_list.append(icon.find_element_by_xpath('./../../td/a').get_attribute('href'))
-                except exceptions.NoSuchElementException:
-                    logger.warning(f'Either no credit notes or unable to find them')
+                if not _load_el:
+                    logger.error("Could not load: %s", allocate_url)
                     continue
 
-                self.total_list.append(current_list)
-        else:
-            current_list = []
-            self.driver.get(
-                f'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED'
-                f'&graphSearch=False&dateWithin=any&page=1&PageSize=200&orderBy=PaidToName&direction=ASC')
-            try:
-                table = WdWait(self.driver, 10).until(
-                    ec.presence_of_element_located((By.CSS_SELECTOR, 'table > tbody')))
-            except exceptions.TimeoutException:
-                self.driver.get(
-                    f'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED'
-                    f'&graphSearch=False&dateWithin=any&page=1&PageSize=200&orderBy=PaidToName&direction=ASC')
+                remaining_credit_text = driver.find_element_by_id('BalanceDue').get_attribute(
+                    'innerText')
+                remaining_credit_text = re.sub(',', '', remaining_credit_text)
+                remaining_credit = round(float(remaining_credit_text), 2)
+                bill_row_array = driver.find_element_by_id(
+                    'creditLineItems').find_elements_by_tag_name(
+                    'tr')
+                for bill_row in bill_row_array:
+
+                    row_due_amount = round(
+                        float(bill_row.find_element_by_css_selector('td > input').get_attribute('value')), 2)
+
+                    if remaining_credit > 0:
+                        if row_due_amount - remaining_credit >= 0:
+                            bill_row.find_element_by_css_selector(
+                                'td > div > span > input').send_keys(
+                                str(remaining_credit))
+                            remaining_credit -= remaining_credit
+
+                        elif row_due_amount - remaining_credit < 0:
+                            bill_row.find_element_by_css_selector(
+                                'td > div > span > input').send_keys(str(row_due_amount))
+                            remaining_credit -= row_due_amount
+
+                    elif remaining_credit < 0:
+                        # print("Calculation Error, didn't fill in", href)
+                        logger.error('Went into a negative value when filling %s', driver.current_url)
+                        break
+
+                # allocate (finalize) button
+                element_clicker(driver, css_selector='.large.green')
+
                 try:
-                    table = WdWait(self.driver, 10).until(
-                        ec.presence_of_element_located((By.CSS_SELECTOR, 'table > tbody')))
+                    WdWait(driver, 10).until(
+                        ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
                 except exceptions.TimeoutException:
-                    self.driver.get(
-                        f'https://go.xero.com/AccountsPayable/Search.aspx?invoiceStatus=INVOICESTATUS%2fAUTHORISED'
-                        f'&graphSearch=False&dateWithin=any&page=1&PageSize=200&orderBy=PaidToName&direction=ASC')
-                    table = WdWait(self.driver, 10).until(
-                        ec.presence_of_element_located((By.CSS_SELECTOR, 'table > tbody')))
-            try:
-                for icon in table.find_elements_by_class_name('icons.credit'):
-                    current_list.append(icon.find_element_by_xpath('./../../td/a').get_attribute('href'))
-            except exceptions.NoSuchElementException:
-                logger.warning(f'Either no credit notes or unable to find them')
+                    logger.error('Unable to re-load the invoice page for confirmation.')
 
-            self.total_list.append(current_list)
+                    with open('compare_csv.csv', mode='a', newline='', encoding='UTF-8') as checker:
+                        fieldnames = ['Link', 'More To Allocate', 'Error']
+                        checker = csv.DictWriter(checker, fieldnames=fieldnames)
 
-    def invoice_pay(self):
-        import re
+                        checker.writerow(
+                            {"Link": href, "More To Allocate": None, "Error": True})
 
-        for href_list in self.total_list:
-            for href in href_list:
-                self.driver.get(href)
-                more_to_allocate = False
-                try:
-                    WdWait(self.driver, 10).until(ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
-                except exceptions.TimeoutException:
-                    self.driver.get(href)
+                else:
                     try:
-                        WdWait(self.driver, 10).until(
-                            ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
-                    except exceptions.TimeoutException:
-                        try:
-                            WdWait(self.driver, 20).until(
-                                ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
-                        except exceptions.TimeoutException:
-                            # print('Error on loading page, continuing')
-                            logger.error(f"could not load {href}")
-                            continue
-
-                if 'Credit Note' in str(self.driver.find_element_by_id('title').text):
-                    try:
-                        allocate_credit_btn = self.driver.find_element_by_css_selector(
+                        driver.find_element_by_css_selector(
                             'dd > ul > li > a[href*="/Credits/Allocate"]')
                     except exceptions.NoSuchElementException:
-                        continue
+                        pass
                     else:
-                        self.driver.get(allocate_credit_btn.get_attribute('href'))
-                        try:
-                            WdWait(self.driver, 30).until(
-                                ec.presence_of_element_located((By.CLASS_NAME, 'document.allocate.forms')))
-                        except exceptions.TimeoutException:
-                            self.driver.get(allocate_credit_btn.get_attribute('href'))
-                            try:
-                                WdWait(self.driver, 30).until(
-                                    ec.presence_of_element_located((By.CLASS_NAME, 'document.allocate.forms')))
-                            except exceptions.TimeoutException:
-                                # print('Error on loading page, continuing')
-                                logger.error(f"Could not load:{allocate_credit_btn.get_attribute('href')}")
-                                continue
+                        more_to_allocate = True
 
-                        # here
-                        remaining_credit_text = self.driver.find_element_by_id('BalanceDue').get_attribute(
-                            'innerText')
-                        remaining_credit_text = re.sub(',', '', remaining_credit_text)
-                        remaining_credit = round(float(remaining_credit_text), 2)
-                        bill_row_array = self.driver.find_element_by_id(
-                            'creditLineItems').find_elements_by_tag_name(
-                            'tr')
-                        for bill_row in bill_row_array:
+                    with open('compare_csv.csv', mode='a', newline='', encoding='UTF-8') as checker:
+                        fieldnames = ['Link', 'More To Allocate', 'Error']
+                        checker = csv.DictWriter(checker, fieldnames=fieldnames)
 
-                            row_due_amount = round(
-                                float(bill_row.find_element_by_css_selector('td > input').get_attribute('value')), 2)
+                        checker.writerow(
+                            {"Link": href, "More To Allocate": more_to_allocate, "Error": None})
 
-                            if remaining_credit > 0:
-                                if row_due_amount - remaining_credit >= 0:
-                                    bill_row.find_element_by_css_selector(
-                                        'td > div > span > input').send_keys(
-                                        str(remaining_credit))
-                                    remaining_credit -= remaining_credit
+                    logger.info('Allocated %s', driver.current_url)
 
-                                elif row_due_amount - remaining_credit < 0:
-                                    bill_row.find_element_by_css_selector(
-                                        'td > div > span > input').send_keys(str(row_due_amount))
-                                    remaining_credit -= row_due_amount
 
-                            elif remaining_credit < 0:
-                                # print("Calculation Error, didn't fill in", href)
-                                logger.error(f'Went into a negative value when filling{self.driver.current_url}')
-                                break
+def href_extraction(driver: Chrome):
+    """
+    Method in charge of collecting all the urls for invoices to be paid
+    :return:
+    """
+    total_list = []
+    driver.get(INVOICE_STATUS)
+    element_waiter(driver, css_selector='#frmMain', url=INVOICE_STATUS)
 
-                        self.driver.find_element_by_class_name('large.green').click()
-                        # input('Allocate?')
+    # Get the number of items that need to be paid out
+    total_items = int(driver.find_element_by_id('total-paged-items').text) - 1
 
-                        try:
-                            WdWait(self.driver, 10).until(
-                                ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
-                        except exceptions.TimeoutException:
-                            logger.error('Unable to re-load the invoice page for confirmation.')
+    if (total_items // 200) > 0:
+        # calculates the number of pages based on the number of items, taking in consideration that pages will
+        # include 200 items
+        page_count = total_items // 200
+        # create a list of page numbers to pass to the first driver.get below
+        page_num = list(range(1, page_count + 2))
+        for pg_num in page_num:
+            driver.get(PAGE_SEARCH.format(pg_num))
+            table = element_waiter(driver, css_selector='table > tbody', url=PAGE_SEARCH.format(pg_num))
+            try:
+                for icon in table.find_elements_by_class_name('icons.credit'):
+                    total_list.append(icon.find_element_by_xpath('./../../td/a').get_attribute('href'))
+            except exceptions.NoSuchElementException:
+                logger.warning('Either no credit notes or unable to find them')
+                continue
 
-                            with open('compare_csv.csv', mode='a', newline='') as checker:
-                                fieldnames = ['Link', 'More To Allocate', 'Error']
-                                checker = csv.DictWriter(checker, fieldnames=fieldnames)
+    else:
+        driver.get(PAGE_SEARCH.format(1))
+        table = element_waiter(driver, css_selector='table > tbody', url=PAGE_SEARCH.format(1))
+        try:
+            for icon in table.find_elements_by_class_name('icons.credit'):
+                total_list.append(icon.find_element_by_xpath('./../../td/a').get_attribute('href'))
+        except exceptions.NoSuchElementException:
+            logger.warning('Either no credit notes or unable to find them')
 
-                                checker.writerow(
-                                    {"Link": href, "More To Allocate": None, "Error": True})
-
-                        else:
-                            try:
-                                self.driver.find_element_by_css_selector(
-                                    'dd > ul > li > a[href*="/Credits/Allocate"]')
-                            except exceptions.NoSuchElementException:
-                                pass
-                            else:
-                                more_to_allocate = True
-
-                            with open('compare_csv.csv', mode='a', newline='') as checker:
-                                fieldnames = ['Link', 'More To Allocate', 'Error']
-                                checker = csv.DictWriter(checker, fieldnames=fieldnames)
-
-                                checker.writerow(
-                                    {"Link": href, "More To Allocate": more_to_allocate, "Error": None})
-
-                            logger.info(f'Allocated {self.driver.current_url}')
+    return total_list
