@@ -8,13 +8,11 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from logic import log_in, org_switch, href_extraction, invoice_pay
 
-
 with open('compare_csv.csv', mode='w', newline='', encoding='UTF-8') as compare_csv:
     field_names = ['Link', 'More To Allocate', 'Error']
     compare_csv = csv.DictWriter(compare_csv, fieldnames=field_names)
 
     compare_csv.writeheader()
-
 
 driver = Chrome(ChromeDriverManager().install())
 driver.maximize_window()
@@ -30,6 +28,8 @@ def runner():
         log.info('Moving to org switching')
         input_org_name = input('Please enter the organisation name: ')
         current_org = org_switch(driver, org_name=input_org_name)
+        if not current_org:
+            raise OrgFinderException('Failed to find an organization with the given name')
         log.info('Navigated to: %s, moving on to extraction of links', str(current_org))
         href_list = href_extraction(driver)
         log.info('Got the links, going through each')
@@ -40,6 +40,11 @@ def runner():
     except:
         logging.exception('Critical Failure')
         driver.quit()
+
+
+class OrgFinderException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
 
 
 if __name__ == '__main__':

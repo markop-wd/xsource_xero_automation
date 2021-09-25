@@ -102,6 +102,3 @@ class LoginException(Exception):
         super().__init__(message)
 
 
-class OrgFinderException(Exception):
-    def __init__(self, message):
-        super().__init__(message)

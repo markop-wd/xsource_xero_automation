@@ -96,7 +96,6 @@ def invoice_pay(driver: Chrome, total_list: list) -> None:
     """
     for href in total_list:
         driver.get(href)
-        more_to_allocate = False
         _load_el = element_waiter(driver, css_selector='.document.invoice', url=href)
         if not _load_el:
             logger.error("could not load %s", href)
@@ -120,10 +119,10 @@ def invoice_pay(driver: Chrome, total_list: list) -> None:
 
                 allocation_input(driver)
 
-                allocation_finalize(driver, href, more_to_allocate)
+                allocation_finalize(driver, href)
 
 
-def allocation_finalize(driver, href, more_to_allocate):
+def allocation_finalize(driver: Chrome, href: str):
     """
     Wait for proper elements to load up, and log the results into the console and the csv
     """
@@ -134,14 +133,14 @@ def allocation_finalize(driver, href, more_to_allocate):
             ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
     except exceptions.TimeoutException:
         logger.error('Unable to re-load the invoice page for confirmation.')
-        csv_append(href, more_to_allocate=None, error=True)
+        csv_append(href, more_to_allocate=False, error=True)
 
     else:
         try:
             driver.find_element_by_css_selector(
                 'dd > ul > li > a[href*="/Credits/Allocate"]')
         except exceptions.NoSuchElementException:
-            pass
+            more_to_allocate = False
         else:
             more_to_allocate = True
 
