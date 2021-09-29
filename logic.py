@@ -18,6 +18,18 @@ from urls import INVOICE_STATUS, PAGE_SEARCH
 logger = logging.getLogger(__name__)
 
 
+def csv_append(href, more_to_allocate, error=None):
+    """
+    Simple function that writes to a .csv
+    """
+    with open('compare_csv.csv', mode='a', newline='', encoding='UTF-8') as checker:
+        fieldnames = ['Link', 'More To Allocate', 'Error']
+        checker = csv.DictWriter(checker, fieldnames=fieldnames)
+
+        checker.writerow(
+            {"Link": href, "More To Allocate": more_to_allocate, "Error": error})
+
+
 def log_in(driver: Chrome):
     """
     Simple log in function utilizing a helper
@@ -87,116 +99,6 @@ def org_switch(driver: Chrome, org_name: str) -> str:
     return current_org
 
 
-def invoice_pay(driver: Chrome, total_list: list) -> None:
-    """
-    Takes all the invoice urls and completes the action/calculations needed to pay them
-    :param driver:
-    :param total_list:
-    :return:
-    """
-    for href in total_list:
-        driver.get(href)
-        _load_el = element_waiter(driver, css_selector='.document.invoice', url=href)
-        if not _load_el:
-            logger.error("could not load %s", href)
-            continue
-
-        if 'Credit Note' in str(driver.find_element_by_id('title').text):
-            try:
-                allocate_credit_btn = driver.find_element_by_css_selector(
-                    'dd > ul > li > a[href*="/Credits/Allocate"]')
-            except exceptions.NoSuchElementException:
-                # The allocate credit button was not found meaning there is nothing to allocate, skip
-                continue
-            else:
-                allocate_url = allocate_credit_btn.get_attribute('href')
-                driver.get(allocate_url)
-                _load_el = element_waiter(driver, css_selector='.document.allocate.forms', url=allocate_url)
-
-                if not _load_el:
-                    logger.error("Could not load: %s", allocate_url)
-                    continue
-
-                allocation_input(driver)
-
-                allocation_finalize(driver, href)
-
-
-def allocation_finalize(driver: Chrome, href: str):
-    """
-    Wait for proper elements to load up, and log the results into the console and the csv
-    """
-    # allocate (finalize) button
-    element_clicker(driver, css_selector='.large.green')
-    try:
-        WdWait(driver, 10).until(
-            ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
-    except exceptions.TimeoutException:
-        logger.error('Unable to re-load the invoice page for confirmation.')
-        csv_append(href, more_to_allocate=False, error=True)
-
-    else:
-        try:
-            driver.find_element_by_css_selector(
-                'dd > ul > li > a[href*="/Credits/Allocate"]')
-        except exceptions.NoSuchElementException:
-            more_to_allocate = False
-        else:
-            more_to_allocate = True
-
-        csv_append(href, more_to_allocate)
-
-        logger.info('Allocated %s', driver.current_url)
-
-
-def csv_append(href, more_to_allocate, error=None):
-    """
-    Simple function that writes to a .csv
-    """
-    with open('compare_csv.csv', mode='a', newline='', encoding='UTF-8') as checker:
-        fieldnames = ['Link', 'More To Allocate', 'Error']
-        checker = csv.DictWriter(checker, fieldnames=fieldnames)
-
-        checker.writerow(
-            {"Link": href, "More To Allocate": more_to_allocate, "Error": error})
-
-
-def allocation_input(driver: Chrome):
-    """
-    The function that is used to handle the input elements and it also houses the logic for allocation calculations
-    """
-    # Remaining credit is how much we have available for allocation
-    remaining_credit_text = driver.find_element_by_id('BalanceDue').get_attribute('innerText')
-    # Remove commas that are used to split above three digit figures e.g. 1,342
-    remaining_credit_text = re.sub(',', '', remaining_credit_text)
-    remaining_credit = round(float(remaining_credit_text), 2)
-    # Find all the rows with the input els where the funds need to be allocated
-    bill_row_array = driver.find_element_by_id(
-        'creditLineItems').find_elements_by_tag_name(
-        'tr')
-    for bill_row in bill_row_array:
-
-        row_due_amount = round(
-            float(bill_row.find_element_by_css_selector('td > input').get_attribute('value')), 2)
-
-        if remaining_credit > 0:
-            if row_due_amount - remaining_credit >= 0:
-                bill_row.find_element_by_css_selector(
-                    'td > div > span > input').send_keys(
-                    str(remaining_credit))
-                remaining_credit -= remaining_credit
-
-            elif row_due_amount - remaining_credit < 0:
-                bill_row.find_element_by_css_selector(
-                    'td > div > span > input').send_keys(str(row_due_amount))
-                remaining_credit -= row_due_amount
-
-        elif remaining_credit < 0:
-            # print("Calculation Error, didn't fill in", href)
-            logger.error('Went into a negative value when filling %s', driver.current_url)
-            break
-
-
 def href_extraction(driver: Chrome):
     """
     Method in charge of collecting all the urls for invoices to be paid
@@ -235,3 +137,103 @@ def href_extraction(driver: Chrome):
             logger.warning('Either no credit notes or unable to find them')
 
     return total_list
+
+
+
+def invoice_pay(driver: Chrome, total_list: list) -> None:
+    """
+    Takes all the invoice urls and completes the action/calculations needed to pay them
+    :param driver:
+    :param total_list:
+    :return:
+    """
+    for href in total_list:
+        driver.get(href)
+        _load_el = element_waiter(driver, css_selector='.document.invoice', url=href)
+        if not _load_el:
+            logger.error("could not load %s", href)
+            continue
+
+        if 'Credit Note' in str(driver.find_element_by_id('title').text):
+            try:
+                allocate_credit_btn = driver.find_element_by_css_selector(
+                    'dd > ul > li > a[href*="/Credits/Allocate"]')
+            except exceptions.NoSuchElementException:
+                # The allocate credit button was not found meaning there is nothing to allocate, skip
+                continue
+            else:
+                allocate_url = allocate_credit_btn.get_attribute('href')
+                driver.get(allocate_url)
+                _load_el = element_waiter(driver, css_selector='.document.allocate.forms', url=allocate_url)
+
+                if not _load_el:
+                    logger.error("Could not load: %s", allocate_url)
+                    continue
+
+                allocation_input(driver)
+
+                allocation_finalize(driver, href)
+
+
+
+def allocation_input(driver: Chrome):
+    """
+    The function that is used to handle the input elements and it also houses the logic for allocation calculations
+    """
+    # Remaining credit is how much we have available for allocation
+    remaining_credit_text = driver.find_element_by_id('BalanceDue').get_attribute('innerText')
+    # Remove commas that are used to split above three digit figures e.g. 1,342
+    remaining_credit_text = re.sub(',', '', remaining_credit_text)
+    remaining_credit = round(float(remaining_credit_text), 2)
+    # Find all the rows with the input els where the funds need to be allocated
+    bill_row_array = driver.find_element_by_id(
+        'creditLineItems').find_elements_by_tag_name(
+        'tr')
+    for bill_row in bill_row_array:
+
+        row_due_amount = round(
+            float(bill_row.find_element_by_css_selector('td > input').get_attribute('value')), 2)
+
+        if remaining_credit > 0:
+            if row_due_amount - remaining_credit >= 0:
+                bill_row.find_element_by_css_selector(
+                    'td > div > span > input').send_keys(
+                    str(remaining_credit))
+                remaining_credit -= remaining_credit
+
+            elif row_due_amount - remaining_credit < 0:
+                bill_row.find_element_by_css_selector(
+                    'td > div > span > input').send_keys(str(row_due_amount))
+                remaining_credit -= row_due_amount
+
+        elif remaining_credit < 0:
+            # print("Calculation Error, didn't fill in", href)
+            logger.error('Went into a negative value when filling %s', driver.current_url)
+            break
+
+
+def allocation_finalize(driver: Chrome, href: str):
+    """
+    Wait for proper elements to load up, and log the results into the console and the csv
+    """
+    # allocate (finalize) button
+    element_clicker(driver, css_selector='.large.green')
+    try:
+        WdWait(driver, 10).until(
+            ec.presence_of_element_located((By.CLASS_NAME, 'document.invoice')))
+    except exceptions.TimeoutException:
+        logger.error('Unable to re-load the invoice page for confirmation.')
+        csv_append(href, more_to_allocate=False, error=True)
+
+    else:
+        try:
+            driver.find_element_by_css_selector(
+                'dd > ul > li > a[href*="/Credits/Allocate"]')
+        except exceptions.NoSuchElementException:
+            more_to_allocate = False
+        else:
+            more_to_allocate = True
+
+        csv_append(href, more_to_allocate)
+
+        logger.info('Allocated %s', driver.current_url)
